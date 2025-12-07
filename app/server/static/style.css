@@ -1,0 +1,40 @@
+/* Minimal styles are inlined in index.html. Extra overrides live here. */
+
+/* Chart sizing: keep canvas height stable to avoid resize feedback loops */
+.chart-wrap {
+  position: relative;
+  height: 320px;          /* default height */
+  max-height: 60vh;       /* don't exceed viewport height */
+}
+
+.chart-wrap canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important; /* Chart.js will use parent height */
+}
+
+/* Modal for Bezier editor */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-overlay.hidden { display: none; }
+
+.modal {
+  background: #151923;
+  border: 1px solid #222839;
+  border-radius: 8px;
+  padding: 12px;
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  color: #d9e1ee;
+}
+
+.modal h3 { margin: 6px 0 6px; font-size: 16px; color: #9bb4ff; }
+.modal .sub { margin-top: 0; color: #9aa6b2; font-size: 12px; }
