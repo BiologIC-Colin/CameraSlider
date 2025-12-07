@@ -19,6 +19,8 @@
   const maxAccelEl = $('#maxAccel');
   const kfBody = $('#kfBody');
   const presetSelect = $('#presetSelect');
+  const primeBtn = document.getElementById('primeBtn');
+  const primePresetBtn = document.getElementById('primePresetBtn');
 
   // Status
   const stState = $('#stState');
@@ -295,6 +297,10 @@
     renderKeyframes(); updateChart();
   });
 
+  primeBtn.addEventListener('click', ()=>{
+    fetch('/api/prime', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(profile) });
+  });
+
   $('#runBtn').addEventListener('click', ()=>{
     fetch('/api/run', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(profile) });
   });
@@ -304,6 +310,10 @@
     const res = await fetch(`/api/presets/${encodeURIComponent(name)}`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(profile) });
     if(res.ok){ await loadPresets(); presetSelect.value = name; }
   });
+  primePresetBtn.addEventListener('click', ()=>{
+    const name = presetSelect.value; if(!name) return; fetch(`/api/prime_preset/${encodeURIComponent(name)}`);
+  });
+
   $('#runPresetBtn').addEventListener('click', ()=>{
     const name = presetSelect.value; if(!name) return; fetch(`/api/run_preset/${encodeURIComponent(name)}`);
   });

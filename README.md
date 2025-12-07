@@ -57,6 +57,8 @@ OBS/Loupedeck Integration
   - POST /api/home
   - POST /api/jog {"distance_mm": 50, "speed_mm_s": 50}
   - POST /api/run with a JSON profile (see examples below)
+  - POST /api/prime with a JSON profile (auto-homes if needed, moves directly to the profile's start position)
+  - GET  /api/prime_preset/<name> (auto-homes if needed, primes to the saved preset's start position)
   - POST /api/stop
   - GET /api/status
 
@@ -73,6 +75,12 @@ JSON Motion Profile (MVP)
   "max_accel_mm_s2": 300
 }
 ```
+
+Priming behavior
+- Priming moves the carriage directly to the first keyframe's `pos_mm` before a run.
+- If the slider is not homed, the system will automatically home first.
+- Movement uses a conservative speed (<= 50 mm/s by default).
+- If already within ~0.5 mm of the start, the movement is skipped.
 
 Systemd service (optional)
 Create `/etc/systemd/system/camera-slider.service`:

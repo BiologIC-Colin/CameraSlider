@@ -70,6 +70,20 @@ def api_run(profile: MotionProfile):
     return {"ok": True}
 
 
+@app.post("/api/prime")
+def api_prime(profile: MotionProfile):
+    """Move directly to the starting position of the provided profile.
+
+    Behavior:
+    - If the slider is not homed, an automatic home is performed first.
+    - Movement uses a conservative speed.
+    - If already at the start within tolerance, no move is performed.
+    """
+    ctl = get_controller()
+    ctl.enqueue_prime(profile)
+    return {"ok": True}
+
+
 @app.post("/api/stop")
 def api_stop():
     ctl = get_controller()
@@ -105,4 +119,15 @@ def api_run_preset(name: str):
         raise HTTPException(404, detail="Preset not found")
     prof = MotionProfile(**data[name])
     ctl.enqueue_run_profile(prof)
+    return {"ok": True}
+
+
+@app.get("/api/prime_preset/{name}")
+def api_prime_preset(name: str):
+    ctl = get_controller()
+    data = ctl.list_presets()
+    if name not in data:
+        raise HTTPException(404, detail="Preset not found")
+    prof = MotionProfile(**data[name])
+    ctl.enqueue_prime(prof)
     return {"ok": True}

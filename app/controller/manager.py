@@ -19,7 +19,7 @@ from ..motion.planner import sample_profile
 log = logging.getLogger(__name__)
 
 
-CommandType = Literal["home", "jog", "run_profile"]
+CommandType = Literal["home", "jog", "run_profile", "prime"]
 
 
 @dataclass
@@ -76,6 +76,9 @@ class SliderController:
     def enqueue_run_profile(self, profile: MotionProfile) -> None:
         self._cmd_q.put(Command("run_profile", {"profile": profile}))
 
+    def enqueue_prime(self, profile: MotionProfile) -> None:
+        self._cmd_q.put(Command("prime", {"profile": profile}))
+
     def stop(self) -> None:
         self._stop_event.set()
         # Clear pending commands
@@ -128,6 +131,8 @@ class SliderController:
                     self._do_jog(cmd.args["distance_mm"], cmd.args["speed_mm_s"])
                 elif cmd.type == "run_profile":
                     self._do_run_profile(cmd.args["profile"])
+                elif cmd.type == "prime":
+                    self._do_prime(cmd.args["profile"])
             except Exception as e:
                 log.exception("Command failed")
                 self.error = str(e)
@@ -162,6 +167,40 @@ class SliderController:
         self.driver.enable(False)
         self.status = "idle"
 
+    def _do_prime(self, profile: MotionProfile) -> None:
+        """Move directly to the starting position of the given profile.
+
+        If not homed, perform an automatic home first. Uses a conservative
+        priming speed for safety. Skips movement if already at start within tolerance.
+        """
+        self.status = "priming"
+        # Auto-home if not homed
+        if not self.homed:
+            self._do_home()
+            if self._stop_event.is_set():
+                self.status = "stopped"
+                return
+        # Determine start position
+        try:
+            start_pos = float(profile.keyframes[0].pos_mm)
+        except Exception:
+            start_pos = 0.0
+        start_pos = max(0.0, min(start_pos, self.cfg.travel_mm))
+
+        # If already at start within tolerance, nothing to do
+        if abs(self.current_pos_mm - start_pos) <= 0.5:
+            self.status = "idle"
+            return
+
+        # Move to start at a safe speed
+        prime_speed = min(50.0, self.cfg.max_speed_mm_s)
+        self.driver.enable(True)
+        try:
+            self._move_to_position(start_pos, max_speed_mm_s=prime_speed)
+        finally:
+            self.driver.enable(False)
+        self.status = "idle"
+
     def _do_run_profile(self, profile: MotionProfile) -> None:
         self.status = "running"
         self.driver.enable(True)
@@ -169,6 +208,7 @@ class SliderController:
         total_t = max(1e-6, times[-1])
 
         # Iterate over consecutive samples and execute steps uniformly over each interval
+        start_time = time.perf_counter()
         for i in range(len(times) - 1):
             if self._stop_event.is_set():
                 break
@@ -178,16 +218,13 @@ class SliderController:
             dp_mm = max(0.0, min(p1, self.cfg.travel_mm)) - max(0.0, min(p0, self.cfg.travel_mm))
 
             steps = int(round(abs(dp_mm) * self.steps_per_mm))
-            if steps == 0:
-                # Just wait for the time interval
-                time.sleep(dt)
-                self.progress = (t1 / total_t)
-                continue
+            # Real-time deadline for this segment relative to profile start
+            seg_deadline = start_time + t1
 
             direction_positive = dp_mm > 0
             self.driver.set_dir(direction_positive)
 
-            period_s = dt / steps
+            period_s = dt / steps if steps > 0 else dt
             # Enforce minimal pulse constraints
             min_period_s = max((self.cfg.step_pulse_us * 2) / 1_000_000.0, 1.0 / 20000.0)
             period_s = max(period_s, min_period_s)
@@ -196,7 +233,9 @@ class SliderController:
             period_s = max(period_s, 1.0 / max_steps_per_s)
             pulse_us = self.cfg.step_pulse_us
 
-            for _ in range(steps):
+            stepped = 0
+            # Step until we hit either the step count or the time deadline
+            while stepped < steps:
                 if self._stop_event.is_set():
                     break
                 # Endstop checks
@@ -206,13 +245,33 @@ class SliderController:
                 if (not direction_positive) and self.driver.read_min_endstop():
                     log.warning("Min endstop hit during profile; stopping segment")
                     break
+                # If we are at/over the deadline, stop this segment to avoid overrunning profile time
+                if time.perf_counter() >= seg_deadline:
+                    break
                 self.driver.pulse_step(pulse_us)
                 self.current_pos_mm += (1 if direction_positive else -1) / self.steps_per_mm
                 # Clamp
                 self.current_pos_mm = max(0.0, min(self.current_pos_mm, self.cfg.travel_mm))
-                time.sleep(period_s)
+                stepped += 1
+                # Sleep, but do not exceed the segment deadline
+                now = time.perf_counter()
+                if now < seg_deadline:
+                    # Remaining time until deadline
+                    remaining = seg_deadline - now
+                    time.sleep(min(period_s, remaining))
 
+            # If we finished early (e.g., steps were 0 or clamped), wait out the remainder of the segment time
+            now = time.perf_counter()
+            if now < seg_deadline and not self._stop_event.is_set():
+                time.sleep(seg_deadline - now)
             self.progress = (t1 / total_t)
+
+        # Ensure we stop exactly at the end of the profile timeline
+        # Snap to the final planned position to avoid a slow tail due to residual timing
+        try:
+            self.current_pos_mm = max(0.0, min(pos[-1], self.cfg.travel_mm))
+        except Exception:
+            pass
 
         self.driver.enable(False)
         self.status = "idle" if not self._stop_event.is_set() else "stopped"
